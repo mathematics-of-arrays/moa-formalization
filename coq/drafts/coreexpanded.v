@@ -1105,8 +1105,6 @@ Next Obligation. (*
       reflexivity.
 Defined.
 
-(* TODO 2: stopped here *)
-
 Program Definition split_slices_saa {dim} {sas : sliceannshape (S dim)} (saa : sliceannarray sas)
     : SigmaVec (sliceannarray (tl_sliceannshape sas)) (hd_sliceannshapebound sas) :=
   let subshape := tl_sliceannshape sas in
