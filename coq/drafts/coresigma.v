@@ -1,15 +1,6 @@
 From Coq Require Import Arith List Omega Program.
 From Equations Require Import Equations.
 
-(* Require Import Coq.Arith.Le.
-Require Import Coq.Arith.Minus.
-Require Import Coq.Arith.Mult.
-Require Import Coq.Arith.PeanoNat.
-Require Import Coq.Lists.List.
-Require Import Coq.Init.Logic.
-Require Import Coq.Init.Peano.
-*)
-
 (* dependent destruction, see https://jamesrwilcox.com/dep-destruct.html *)
 Require Import Program.
 (* === index spaces definition utils === *)
@@ -18,31 +9,46 @@ From Coq Require Import Lia.
 Require Import Coq.Vectors.Fin.
 
 (* transport in HoTT, maybe useful looking at these libraries *)
-Definition transport {T : Type} {x y : T} {P : T -> Type} (u : P x)
-  (pf : x = y) : P y := match pf with | eq_refl => u end.
+Definition transport {T: Type} {x y: T} {P: T -> Type} (u: P x)
+  (pf: x = y): P y := match pf with | eq_refl => u end.
 
 Module Array.
 Section Array.
-  Context {E : Type}.
+  Context {E: Type}.
 
-  Definition Shape dim := { s : list nat | length s = dim }.
-  Definition Vect E dim := { v : list E | length v = dim }.
+  Definition Fin n := { i: nat | i < n }.
+  Definition Shape dim := { s: list nat | length s = dim }.
 
-  Definition Fin n := { i : nat | i < n }.
+  Definition get (l: list nat) (i: nat) := nth i l 0.
 
-  Definition pi {dim : nat} (shape : Shape dim) : nat :=
+  Definition Index {dim} (shape: Shape dim) :=
+    { ix : list nat |  length ix = dim
+                    /\ forall (i: Fin dim), get ix (` i) < get (` shape) (` i) }.
+
+  Definition Array {dim} E (shape : Shape dim) :=
+    Index shape -> E.
+
+  Definition pi {dim} (shape: Shape dim) : nat :=
     fold_right (fun x y => x * y) 1 (` shape).
-
-  Definition Array {dim : nat} E (shape : Shape dim) :=
-    Vect E (pi shape).
 
   (* === MoA operations === *)
 
   (* === array projections === *)
-  Definition rho {dim : nat} {shape : Shape dim}
+
+  Definition rho {dim} {shape: Shape dim}
     (array : Array E shape) : Shape dim := shape.
-  Definition elems {dim : nat} {shape : Shape dim}
-    (array : Array E shape) : Vect E (pi shape) := array.
+  Definition total_ix {dim} {shape: Shape dim}
+                      (i: Index shape) (array: Array E shape) : E :=
+    array i.
+
+  (* TODO: the below must be rewritten according to the new definitions *)
+  (*
+  (* === reshaping utils === *)
+
+  Definition reshape {dim1 dim2} {shape1: Shape dim1}
+      (array: Array E shape1) (shape2: Shape dim2)
+      (eq_pi_shapes: pi shape1 = pi shape2) : Array E shape2 :=
+    
 
   (* === reshaping utils === *)
 
@@ -370,7 +376,7 @@ Section Array.
         apply Nat.le_sub_l.
   Defined.
   Admit Obligations. (* TODO: finish *)
-
+*)
   (* TODO: finish core *)
 End Array.
   (* TODO: expand *)
