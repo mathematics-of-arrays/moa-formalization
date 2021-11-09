@@ -287,7 +287,7 @@ Section Array.
   Defined.
 
   (* === take / drop / cat === *)
-  Program Definition take_shape {dim} (shape: Shape (S dim)) (n: Fin (hd 0 (` shape))): Shape (S dim) :=
+  Program Definition take_shape {dim} (shape: Shape (S dim)) (n: Fin (S (hd 0 (` shape)))): Shape (S dim) :=
     exist _ (n :: tl (` shape)) _.
   Next Obligation. (* S (length (tl (` shape))) = S dim *)
     destruct shape as [shape_list shape_list_has_length_Sdim].
@@ -297,7 +297,7 @@ Section Array.
     * simpl; exact shape_list_has_length_Sdim.
   Defined.
 
-  Program Definition take {dim} {shape: Shape (S dim)} (n: Fin (hd 0 (` shape))) (array: Array E shape)
+  Program Definition take {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
       : Array E (take_shape shape n) :=
     fun ix => array ix.
   Next Obligation. split.
@@ -316,9 +316,9 @@ Section Array.
         * exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
         * pose proof (proj2 ix_list_properties (exist _ O axis_lt_Sdim)) as proof.
           simpl in proof; simpl in n.
-          destruct n as [n n_lt_shape_list_O]; simpl in proof.
+          destruct n as [n n_lt_Sshape_list_O]; simpl in proof.
           unfold get in proof; unfold get; simpl; simpl in proof.
-          apply (Nat.lt_trans _ _ _ proof n_lt_shape_list_O).
+          apply (Nat.lt_le_trans _ _ _ proof (le_S_n _ _ n_lt_Sshape_list_O)).
       (* get ix_list (S axis_val') < get shape_list (S axis_val') *)
       - destruct shape_list as [|shape_list_O shape_list']; simpl.
         (* absurd *)
@@ -327,139 +327,106 @@ Section Array.
           unfold get; unfold get in proof; simpl; simpl in proof. exact proof.
   Defined.
 
-    (* TODO: here *)
-
-  Program Fixpoint drop_vec {n : nat} (k : Fin (S n)) (v : Vect E n) {struct n} 
-      : Vect E (n - (` k)) :=
-    match k with
-      | O => v
-      | S k' =>
-      match n, v in list _ with
-        | O, _ => _ (* absurd *)
-        | S n', e :: v' => exist _ (` (drop_vec (n:=n') (exist _ k' _) (exist _ v' _))) _
-        | S _, _ => _ (* absurd *)
-      end end.
-  Next Obligation. (* absurd *)
-    destruct v as [v length_v_is_n]. simpl.
-    rewrite Nat.sub_0_r. apply length_v_is_n.
-  Defined.
-  Next Obligation. (* k' < S n' *)
-    destruct k as [k k_lt_SSn']. simpl in Heq_k.
-    rewrite <- Heq_k in k_lt_SSn'.
-    apply (le_S_n _ _ k_lt_SSn').
-  Defined.
-  Next Obligation. (* length v' = n' *)
-    destruct v as [v length_v_is_n]. simpl in Heq_v.
-    rewrite <- Heq_v in length_v_is_n. simpl in length_v_is_n.
-    apply (eq_add_S _ _ length_v_is_n).
-  Defined.
-  Next Obligation. (* absurd, H : forall (n' : nat) (e : E) (v' : list E), ~ (S n' = S wildcard' /\ e :: v' = ` v) *)
-    destruct v as [v length_v_is_n].
-    destruct v as [|e v'].
-      (* v = vnil *)
-      + simpl in length_v_is_n. exfalso. apply (Nat.neq_0_succ _ length_v_is_n).
-      (* v = e :: v' *)
-      + specialize (H wildcard' e v').
-        simpl in H. unfold not in H.
-        exfalso. apply (H (conj eq_refl eq_refl)).
+  Program Definition drop_shape {dim} (shape: Shape (S dim)) (n: Fin (S (hd 0 (` shape)))): Shape (S dim) :=
+    exist _ ((hd 0 (` shape) - n) :: tl (` shape)) _.
+  Next Obligation. (* S (length (tl (` shape))) = S dim *)
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    * exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    * simpl; exact shape_list_has_length_Sdim.
   Defined.
 
-  Program Definition drop_shape {dim : nat} (s : Shape dim) (k : Fin (hd 0 (` s)))
-      : Shape dim :=
-    exist _ (((hd 0 (` s)) - (` k)) :: tl (` s)) _.
-  Next Obligation. (* S (length (tl (` s))) = dim *)
-    destruct s as [s length_s_is_dim].
-    simpl in k. simpl.
-    destruct dim as [|dim'].
-      (* dim = O *)
-      - destruct s as [|s_O s'].
-        (* s = nil *)
-        * simpl in k. destruct k as [k k_lt_O].
-          exfalso. apply (Nat.nlt_0_r _ k_lt_O).
-        (* s = s_O :: s' *)
-        * simpl in length_s_is_dim. discriminate.
-      (* dim = S dim' *)
-      - destruct s as [|s_O s'].
-        (* s = nil *)
-        * simpl in length_s_is_dim. discriminate.
-        (* s = s_O :: s' *)
-        * apply length_s_is_dim.
+  Program Definition drop {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
+      : Array E (drop_shape shape n) :=
+    fun ix => let ix' := from_lin (to_lin ix + n * pi (tail_shape shape)) shape _ in
+              array ix'.
+  Next Obligation. (* to_lin ix + ` n * pi (tail_shape shape) < pi shape *)
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    * exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    (*
+      to_lin ix + ` n * fold_right (fun x y : nat => x * y) 1 shape_list' <
+      shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list'
+     *)
+    * unfold pi; simpl. simpl in n. unfold drop_shape in ix; simpl in ix.
+      destruct n as [n_val n_lt_Sshape_list_O].
+      destruct n_val as [|n_val']; simpl.
+      (* to_lin ix < shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list' *)
+      - simpl in ix. rewrite Nat.add_0_r.
+        pose proof (to_lin_ix_lt_pi_shape (exist _ ((shape_list_O - O) :: shape_list') shape_list_has_length_Sdim) ix) as proof.
+        assert (pi (exist (fun s : list nat => length s = S dim) (shape_list_O - 0 :: shape_list') shape_list_has_length_Sdim) =
+                pi (exist (fun s : list nat => length s = S dim) (shape_list_O :: shape_list') shape_list_has_length_Sdim)) as pi_rewrite.
+        + rewrite Nat.sub_0_r; reflexivity.
+        + rewrite pi_rewrite in proof; unfold pi in proof; simpl in proof. exact proof.
+      - simpl in ix.
+        pose proof (to_lin_ix_lt_pi_shape (exist _ ((shape_list_O - S n_val') :: shape_list') shape_list_has_length_Sdim) ix) as proof. 
+        destruct ix as [ix_list ix_list_properties]; simpl.
+        destruct ix_list_properties as [ix_list_has_length_Sdim ix_list_is_in_shape].
+        destruct ix_list as [|ix_list_O ix_list'].
+        (* absurd *)
+        + exfalso; apply (Nat.neq_0_succ _ ix_list_has_length_Sdim).
+        + simpl in proof.
+          assert (fold_right (fun x y : nat => x * y) 1 shape_list' + n_val' * fold_right (fun x y : nat => x * y) 1 shape_list' +
+                  pi (exist (fun s : list nat => length s = S dim) (shape_list_O - S n_val' :: shape_list')
+                        shape_list_has_length_Sdim) =
+                  shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list') as pi_eq.
+          -- unfold pi; simpl. remember (fold_right (fun x y : nat => x * y) 1 shape_list') as pi_shape_list'.
+             pattern pi_shape_list' at 1.
+             rewrite <- (Nat.mul_1_l pi_shape_list').
+             rewrite <- Nat.mul_add_distr_r; rewrite <- Nat.mul_add_distr_r.
+             rewrite Nat.add_1_l. rewrite le_plus_minus_r. reflexivity.
+             (* S n_val' <= shape_list_O *)
+             ++ apply (le_S_n _ _ n_lt_Sshape_list_O).
+          -- rewrite <- pi_eq; simpl. rewrite Nat.add_comm. apply plus_lt_compat_l.
+             exact proof.
   Defined.
 
-  Program Definition drop {dim : nat} {s : Shape (S dim)} (k : Fin (hd 0 (` s)))
-        (a : Array E s) : Array E (drop_shape s k) :=
-    exist _ (drop_vec (n:=pi s) (k * pi (dim:=dim) (tl (` s))) (` a)) _.
-  Next Obligation.
-    destruct s as [s length_s_is_Sdim].
-    simpl in k. simpl.
-    destruct s as [|s_O s'].
-      (* s = nil *)
-      - simpl in length_s_is_Sdim. discriminate.
-      (* s = s_O :: s' *)
-      - apply (eq_add_S _ _ length_s_is_Sdim).
+  Program Definition take_neg {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
+      : Array E (take_shape shape n) :=
+    drop (exist _ (hd 0 (` shape) - n) _) array.
+  Next Obligation. (* hd 0 (` shape) - ` n < S (hd 0 (` shape)) *)
+    lia.
   Defined.
-  Next Obligation.
-    destruct s as [s length_s_is_Sdim].
-    generalize (take_obligation_1 dim (exist (fun s0 : list nat => length s0 = S dim) s length_s_is_Sdim) k a).
-    simpl.
-    destruct s as [|s_O s'].
-      (* s = nil *)
-      - simpl in length_s_is_Sdim. discriminate.
-      (* s = s_O :: s' *)
-      - simpl. intro e. simpl in k.
-        destruct k as [k k_lt_s_O].
-        simpl. unfold pi. unfold proj1_sig. unfold fold_right.
-        apply le_n_S. apply Nat.mul_le_mono_r.
-        apply (le_Sn_le _ _ k_lt_s_O).
+  Next Obligation. split.
+    (* length (` x) = S dim *)
+    + destruct x as [ix_list ix_list_properties]; apply (proj1 ix_list_properties).
+    (* forall i : Fin (S dim), get (` x) (` i) < get (hd 0 (` shape) - (hd 0 (` shape) - ` n) :: tl (` shape)) (` i) *)
+    + destruct x as [ix_list ix_list_properties]; simpl.
+      destruct ix_list_properties as [ix_list_has_length_Sdim ix_list_is_in_shape].
+      unfold take_shape in ix_list_is_in_shape; simpl in ix_list_is_in_shape.
+      intro i.
+      destruct i as [i_val i_lt_Sdim].
+      destruct i_val as [|i_val'].
+      (* get ix_list 0 < get (hd 0 (` shape) - (hd 0 (` shape) - ` n) :: tl (` shape)) 0 *)
+      - unfold get; simpl.
+        unfold get in ix_list_is_in_shape.
+        pose proof (ix_list_is_in_shape (exist _ 0 i_lt_Sdim)) as ix_list_O_lt_n; simpl in ix_list_O_lt_n.
+        Search (?y + ?z <= ?x + ?z).
+        apply ((fun m n p rel => proj2 (Nat.add_le_mono_r m n p) rel) _ _ (hd 0 (` shape) - ` n)); simpl.
+        destruct n as [n_val n_lt_Sshape_list_O]; simpl.
+        rewrite (Nat.sub_add _ _ (Nat.le_sub_l _ _)).
+        rewrite (Nat.add_sub_assoc _ _ _ (le_S_n _ _ n_lt_Sshape_list_O)); simpl.
+        Search (?x <= ?y -> ?x <= ?z + ?y).
+        rewrite minus_Sn_m.
+        (* S (nth 0 ix_list 0 + hd 0 (` shape)) - n_val <= hd 0 (` shape) *)
+        * rewrite <- Nat.add_succ_l. simpl in ix_list_O_lt_n.
+          pose proof (proj2 (Nat.sub_0_le (S (nth 0 ix_list 0)) n_val) (ix_list_is_in_shape (exist _ 0 i_lt_Sdim))) as proof_eq_helper.
+          pose proof (Nat.le_refl 0) as proof.
+          pattern 0 at 1 in proof.
+          rewrite <- proof_eq_helper in proof.
+          apply (fun n m pf => plus_le_compat_r n m (hd 0 (` shape)) pf) in proof.
+          assert (S (nth 0 ix_list 0) + hd 0 (` shape) - n_val <= S (nth 0 ix_list 0) - n_val + hd 0 (` shape)) as proof_ord.
+          -- lia.
+          -- apply (Nat.le_trans _ _ _ proof_ord proof).
+        (* n_val <= nth 0 ix_list 0 + hd 0 (` shape) *)
+        * lia.
+     (* nth (S i_val') ix_list 0 < nth i_val' (tl (` shape)) 0 *)
+     - apply (ix_list_is_in_shape (exist _ (S i_val') i_lt_Sdim)).
   Defined.
-  Next Obligation. (* length (` a) = pi s *)
-    apply (proj2_sig a).
-  Defined.
-  Next Obligation. (* length (` v) = pi (drop_shape s k) *)
-    generalize (drop_vec
-      (exist (fun i : nat => i < S (pi s))
-         (` k * pi (exist (fun s0 : list nat => length s0 = dim) (tl (` s)) (drop_obligation_1 dim s k a)))
-         (drop_obligation_2 dim s k a)) (exist (fun v : list E => length v = pi s) (` a) (drop_obligation_3 dim s a))).
-    simpl.
-    intro v. destruct v as [v length_v_is_ktls].
-    simpl. unfold take_shape. unfold pi.
-    simpl.
-    destruct s as [s length_s_is_sdim].
-    destruct s as [|s_O s'].
-      (* s = nil, absurd *)
-      - destruct k as [k k_lt_O]. exfalso. apply (Nat.nlt_0_r _ k_lt_O).
-      - simpl. unfold pi in length_v_is_ktls.
-        simpl in length_v_is_ktls.
-        rewrite Nat.mul_sub_distr_r.
-        apply length_v_is_ktls.
-  Defined.
+  (* TODO: drop_neg *)
 
-  Program Definition take_neg {dim : nat} {s : Shape (S dim)} (k : Fin (hd 0 (` s)))
-        (a : Array E s) : Array E (take_shape s k) :=
-    exist _ (drop_vec (n:=pi s) (((hd 0 (` s)) - (` k)) * pi (dim:=dim) (tl (` s))) (` a)) _.
-  Next Obligation. (* length (tl (` s)) = dim *)
-    destruct s as [s length_s_is_sdim].
-    simpl in k. simpl.
-    destruct s as [|s_O s'].
-    (* s = nil *)
-    - simpl in k. destruct k as [k k_lt_O].
-      exfalso. apply (Nat.nlt_0_r _ k_lt_O).
-    (* s = s_O :: s' *)
-    - apply (eq_add_S _ _ length_s_is_sdim).
-  Defined.
-  Next Obligation. simpl.
-    destruct s as [s length_s_is_sdim].
-    destruct s as [|s_O s'].
-      (* s = nil *)
-      - simpl in length_s_is_sdim. discriminate.
-      (* s = s_O :: s' *)
-      - simpl. unfold pi. simpl.
-        apply Peano.le_n_S.
-        apply Nat.mul_le_mono_r.
-        apply Nat.le_sub_l.
-  Defined.
-  Admit Obligations. (* TODO: finish *)
-*)
   (* TODO: finish core *)
 End Array.
   (* TODO: expand *)
