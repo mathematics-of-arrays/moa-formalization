@@ -1,4 +1,5 @@
 From Coq Require Import Arith List Omega Program.
+From Coq.Logic Require Import FunctionalExtensionality.
 From Equations Require Import Equations.
 
 (* dependent destruction, see https://jamesrwilcox.com/dep-destruct.html *)
@@ -339,48 +340,42 @@ Section Array.
 
   Program Definition drop {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
       : Array E (drop_shape shape n) :=
-    fun ix => let ix' := from_lin (to_lin ix + n * pi (tail_shape shape)) shape _ in
+    fun ix => let ix' := exist _ (hd O (` ix) + n :: tail_ix ix) _ in
               array ix'.
-  Next Obligation. (* to_lin ix + ` n * pi (tail_shape shape) < pi shape *)
-    destruct shape as [shape_list shape_list_has_length_Sdim].
-    destruct shape_list as [|shape_list_O shape_list'].
-    (* absurd *)
-    * exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
-    (*
-      to_lin ix + ` n * fold_right (fun x y : nat => x * y) 1 shape_list' <
-      shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list'
-     *)
-    * unfold pi; simpl. simpl in n. unfold drop_shape in ix; simpl in ix.
-      destruct n as [n_val n_lt_Sshape_list_O].
-      destruct n_val as [|n_val']; simpl.
-      (* to_lin ix < shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list' *)
-      - simpl in ix. rewrite Nat.add_0_r.
-        pose proof (to_lin_ix_lt_pi_shape (exist _ ((shape_list_O - O) :: shape_list') shape_list_has_length_Sdim) ix) as proof.
-        assert (pi (exist (fun s : list nat => length s = S dim) (shape_list_O - 0 :: shape_list') shape_list_has_length_Sdim) =
-                pi (exist (fun s : list nat => length s = S dim) (shape_list_O :: shape_list') shape_list_has_length_Sdim)) as pi_rewrite.
-        + rewrite Nat.sub_0_r; reflexivity.
-        + rewrite pi_rewrite in proof; unfold pi in proof; simpl in proof. exact proof.
-      - simpl in ix.
-        pose proof (to_lin_ix_lt_pi_shape (exist _ ((shape_list_O - S n_val') :: shape_list') shape_list_has_length_Sdim) ix) as proof. 
-        destruct ix as [ix_list ix_list_properties]; simpl.
-        destruct ix_list_properties as [ix_list_has_length_Sdim ix_list_is_in_shape].
+    Next Obligation. split.
+      (* S (length (tl (` ix))) = S dim *)
+      * destruct ix as [ix_list ix_list_properties].
         destruct ix_list as [|ix_list_O ix_list'].
         (* absurd *)
-        + exfalso; apply (Nat.neq_0_succ _ ix_list_has_length_Sdim).
-        + simpl in proof.
-          assert (fold_right (fun x y : nat => x * y) 1 shape_list' + n_val' * fold_right (fun x y : nat => x * y) 1 shape_list' +
-                  pi (exist (fun s : list nat => length s = S dim) (shape_list_O - S n_val' :: shape_list')
-                        shape_list_has_length_Sdim) =
-                  shape_list_O * fold_right (fun x y : nat => x * y) 1 shape_list') as pi_eq.
-          -- unfold pi; simpl. remember (fold_right (fun x y : nat => x * y) 1 shape_list') as pi_shape_list'.
-             pattern pi_shape_list' at 1.
-             rewrite <- (Nat.mul_1_l pi_shape_list').
-             rewrite <- Nat.mul_add_distr_r; rewrite <- Nat.mul_add_distr_r.
-             rewrite Nat.add_1_l. rewrite le_plus_minus_r. reflexivity.
-             (* S n_val' <= shape_list_O *)
-             ++ apply (le_S_n _ _ n_lt_Sshape_list_O).
-          -- rewrite <- pi_eq; simpl. rewrite Nat.add_comm. apply plus_lt_compat_l.
-             exact proof.
+        - exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+        (* S (length ix_list') = S dim *)
+        - simpl. exact (proj1 ix_list_properties).
+      (* forall i : Fin (S dim), get (hd 0 (` ix) + ` n :: tl (` ix)) (` i) < get (` shape) (` i) *)
+      * intro i. destruct i as [i_val i_val_lt_Sdim].
+        simpl.
+        destruct ix as [ix_list ix_list_properties]; simpl; simpl in ix_list_properties.
+        destruct n as [n_val n_val_lt_Sshape_list_O]; simpl.
+        destruct shape as [shape_list shape_list_has_length_Sdim]; simpl.
+        destruct ix_list as [|ix_list_O ix_list'].
+        (* absurd *)
+        - exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+        (* get (ix_list_O + n_val :: ix_list') i_val < get shape_list i_val *)
+        - simpl. destruct shape_list as [|shape_list_O shape_list'].
+          (* absurd *)
+          + exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+          (* get (ix_list_O + n_val :: ix_list') i_val < get (shape_list_O :: shape_list') i_val *)
+          + simpl in ix_list_properties. destruct i_val as [|i_val'].
+            (* i_val = 0 *)
+            ** unfold get; simpl.
+               pose proof (proj2 ix_list_properties (exist _ 0 i_val_lt_Sdim)) as proof.
+               unfold get in proof; simpl in proof.
+               Search (?x <= ?y -> ?x + ?z <= ?y + ?z).
+               apply (plus_le_compat_r _ _ n_val) in proof.
+               simpl in n_val_lt_Sshape_list_O.
+               rewrite (Nat.sub_add _ _ (le_S_n _ _ n_val_lt_Sshape_list_O)) in proof.
+               exact proof.
+            (* i_val = S i_val' *)
+            ** apply (proj2 ix_list_properties (exist _ (S i_val') i_val_lt_Sdim)).
   Defined.
 
   Program Definition take_neg {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
@@ -425,7 +420,399 @@ Section Array.
      (* nth (S i_val') ix_list 0 < nth i_val' (tl (` shape)) 0 *)
      - apply (ix_list_is_in_shape (exist _ (S i_val') i_lt_Sdim)).
   Defined.
-  (* TODO: drop_neg *)
+
+  Program Definition drop_neg {dim} {shape: Shape (S dim)} (n: Fin (S (hd 0 (` shape)))) (array: Array E shape)
+      : Array E (drop_shape shape n) :=
+    take (exist _ (hd 0 (` shape) - n) _) array.
+  Next Obligation. (* hd 0 (` shape) - ` n < S (hd 0 (` shape)) *)
+    lia.
+  Defined.
+
+  Definition A : E. Admitted.
+  Definition B : E. Admitted.
+  Definition C : E. Admitted.
+  Definition D : E. Admitted.
+
+  Definition shape_list_4 := 4 :: nil.
+  Theorem shape_list_4_has_length_1 : length shape_list_4 = 1. Proof. auto. Qed. 
+  Definition Shape4 : Shape 1 := exist _ (4 :: nil) shape_list_4_has_length_1.
+
+  Program Definition test_array : Array (dim:=1) E Shape4 :=
+    fun ix => match (` ix) with | 0 :: nil => A
+                                | 1 :: nil => B
+                                | 2 :: nil => C
+                                | 3 :: nil => D
+                                | _ => (* absurd *) _ end.
+  Next Obligation. (* absurd *)
+    destruct ix as [ix_list ix_list_properties]; simpl in H; simpl in H0; simpl in H1; simpl in H2.
+    destruct ix_list_properties as [ix_list_has_length_1 ix_list_is_in_shape].
+    pose proof (ix_list_is_in_shape (exist _ 0 Nat.lt_0_1)) as ix_ord.
+    destruct ix_list as [|ix_list_O ix_list'].
+    + exfalso; apply (Nat.neq_0_succ _ ix_list_has_length_1).
+    + destruct ix_list' as [|ix_list_1 ix_list''].
+      - unfold get in ix_ord; simpl in ix_ord.
+        assert (4 <= ix_list_O) as inconsistent_proof.
+        * destruct ix_list_O as [|ix_list_O].
+          -- exfalso; apply H2; reflexivity.
+          -- destruct ix_list_O as [|ix_list_O].
+             ++ exfalso; apply H; reflexivity.
+             ++ destruct ix_list_O as [|ix_list_O].
+                ** exfalso; apply H0; reflexivity.
+                ** destruct ix_list_O as [|ix_list_O].
+                   --- exfalso; apply H1; reflexivity.
+                   --- repeat (apply le_S_n in ix_ord). exfalso; apply (Nat.nle_succ_0 _ ix_ord).
+        * exfalso; apply (Nat.lt_irrefl _ (Nat.lt_le_trans _ _ _ ix_ord inconsistent_proof)).
+      - simpl in ix_list_has_length_1. apply eq_add_S in ix_list_has_length_1.
+        exfalso; apply (Nat.neq_succ_0 _ ix_list_has_length_1).
+  Defined.
+  Next Obligation. (* 1 :: nil <> nil /\ 2 :: nil <> nil /\ 3 :: nil <> nil /\ 0 :: nil <> nil *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+  Next Obligation. (* 1 :: nil <> 0 :: H1 :: H2 /\ 2 :: nil <> 0 :: H1 :: H2 /\ 3 :: nil <> 0 :: H1 :: H2 /\ 0 :: nil <> 0 :: H1 :: H2 *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+  Next Obligation. (* 1 :: nil <> 1 :: H2 :: H3 /\ 2 :: nil <> 1 :: H2 :: H3 /\ 3 :: nil <> 1 :: H2 :: H3 /\ 0 :: nil <> 1 :: H2 :: H3 *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+  Next Obligation. (* 1 :: nil <> 2 :: H3 :: H4 /\ 2 :: nil <> 2 :: H3 :: H4 /\ 3 :: nil <> 2 :: H3 :: H4 /\ 0 :: nil <> 2 :: H3 :: H4 *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+  Next Obligation. (* 1 :: nil <> 3 :: H4 :: H5 /\ 2 :: nil <> 3 :: H4 :: H5 /\ 3 :: nil <> 3 :: H4 :: H5 /\ 0 :: nil <> 3 :: H4 :: H5 *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+  Next Obligation. (* 1 :: nil <> S (S (S (S H4))) :: H0 /\
+                      2 :: nil <> S (S (S (S H4))) :: H0 /\ 3 :: nil <> S (S (S (S H4))) :: H0 /\ 0 :: nil <> S (S (S (S H4))) :: H0 *)
+    split.
+    + unfold not; intro disc_H; discriminate disc_H.
+    + split. - unfold not; intro disc_H; discriminate disc_H.
+             - split. * unfold not; intro disc_H; discriminate disc_H.
+                      * unfold not; intro disc_H; discriminate disc_H.
+  Defined.
+
+  Program Definition ix_1_Shape4 : Index Shape4 := exist _ (1 :: nil) _.
+  Next Obligation. split. reflexivity.
+    intro i; destruct i as [i_val i_lt_1]; simpl.
+    destruct i_val as [|i_val].
+    + unfold get; simpl. apply lt_n_S. apply Nat.lt_0_succ.
+    + exfalso; apply lt_S_n in i_lt_1; apply (Nat.nlt_0_r _ i_lt_1).
+  Defined.
+
+  Compute test_array ix_1_Shape4.
+
+  Definition shape_list_2_2 := 2 :: 2 :: nil.
+  Lemma shape_list_2_2_has_length_2 : length shape_list_2_2 = 2. Proof. auto. Qed. 
+  Definition Shape2_2 : Shape 2 := exist _ shape_list_2_2 shape_list_2_2_has_length_2.
+  Lemma pi_shape4_eq_pi_shape2_2 : pi Shape4 = pi Shape2_2. Proof. auto. Qed.
+
+  Program Definition ix_0_1_Shape2_2 : Index Shape2_2 := exist _ (0 :: 1 :: nil) _.
+  Next Obligation. split. reflexivity.
+    intro i; destruct i as [i_val i_lt_2]; simpl.
+    destruct i_val as [|i_val].
+    + unfold get; simpl. exact i_lt_2.
+    + destruct i_val as [|i_val].
+      - unfold get; simpl. apply lt_n_S. apply Nat.lt_0_succ.
+      - exfalso; repeat (apply lt_S_n in i_lt_2); apply (Nat.nlt_0_r _ i_lt_2).
+  Defined.
+
+  Compute (reshape test_array Shape2_2 pi_shape4_eq_pi_shape2_2) ix_0_1_Shape2_2.
+
+  Definition psi {dim} {shape: Shape dim} := total_ix (dim:=dim) (shape:=shape).
+
+  Program Definition cat_shape {dim} (shape1: Shape (S dim)) (shape2: Shape (S dim))
+        (eq_tl_shapes: tail_shape shape1 = tail_shape shape2) : Shape (S dim) :=
+    exist _ (hd O (` shape1) + hd O (` shape2) :: tl (` shape1)) _.
+  Next Obligation. (* S (length (tl (` shape1))) = S dim *)
+    destruct shape1 as [shape1_list shape1_list_has_length_Sdim]; simpl.
+    destruct shape1_list as [|shape1_list_O shape_1_list'].
+    (* absurd *)
+    - exfalso; apply (Nat.neq_0_succ _ shape1_list_has_length_Sdim).
+    (* S (length shape_1_list') = S dim *)
+    - apply shape1_list_has_length_Sdim.
+  Defined.
+
+  Program Definition cat {dim} {shape1 shape2: Shape (S dim)} (array1: Array E shape1)
+        (array2: Array E shape2) (eq_tl_shapes: tail_shape shape1 = tail_shape shape2)
+      : Array E (cat_shape shape1 shape2 eq_tl_shapes) :=
+    fun ix => let shape1_first_axis := hd O (` shape1) in
+              let ix_first_axis := hd O (` ix) in
+              match ix_first_axis <? shape1_first_axis with
+                | true => array1 (exist _ (` ix) _)
+                | false => array2 (exist _ (ix_first_axis - shape1_first_axis :: (tl (` ix))) _) end.
+  Next Obligation. split.
+    (* length (` ix) = S dim *)
+    + destruct ix as [ix_list ix_list_properties]; simpl.
+      apply (proj1 ix_list_properties).
+    (* forall i : Fin (S dim), get (` ix) (` i) < get (` shape1) (` i) *)
+    + intro i. destruct i as [i_val i_val_lt_Sdim].
+      pose proof (proj1 (Nat.ltb_lt _ _) (eq_sym Heq_anonymous)) as hd_ix_lt_hd_shape1.
+      destruct i_val as [|i_val]; simpl.
+      (* get (` ix) 0 < get (` shape1) 0 *)
+      - unfold cat_shape in ix; simpl in ix; simpl in Heq_anonymous.
+        destruct ix as [ix_list ix_list_properties]; destruct shape1 as [shape_list shape_list_has_length_Sdim].
+        simpl in ix_list_properties; simpl; simpl in hd_ix_lt_hd_shape1; simpl in Heq_anonymous.
+        destruct ix_list as [|ix_list_0 ix_list'].
+        (* absurd *)
+        * exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+        (* get (ix_list_0 :: ix_list') 0 < get shape_list 0 *)
+        * destruct shape_list as [|shape_list_0 shape_list'].
+          (* absurd *)
+          ++ exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+          (* get (ix_list_0 :: ix_list') 0 < get (shape_list_0 :: shape_list') 0 *)
+          ++ simpl in hd_ix_lt_hd_shape1. unfold get; unfold nth; simpl. exact hd_ix_lt_hd_shape1.
+      (* get (` ix) (S i_val) < get (` shape1) (S i_val) *)
+      - destruct ix as [ix_list ix_list_properties].
+        simpl in ix_list_properties; simpl; simpl in hd_ix_lt_hd_shape1; simpl in Heq_anonymous.
+        pose proof (proj2 ix_list_properties (exist _ (S i_val) i_val_lt_Sdim)) as proof.
+        unfold get; unfold get in proof; simpl; simpl in proof.
+        destruct shape1 as [shape_list shape_list_has_length_Sdim];
+        destruct shape_list as [|shape_list_O shape_list'].
+        simpl in ix_list_properties; simpl; simpl in hd_ix_lt_hd_shape1; simpl in Heq_anonymous.
+        (* absurd *)
+        * exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+        (* nth (S i_val) ix_list 0 < nth i_val shape_list' 0 *)
+        * simpl; simpl in proof. exact proof.
+  Defined.
+  Next Obligation. split.
+    (* S (length (tl ix_list)) = S dim *)
+    + destruct ix as [ix_list ix_list_properties]; destruct ix_list as [|ix_list_O ix_list']; simpl.
+      (* absurd *)
+      - exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+      (* S (length ix_list') = S dim *)
+      - exact (proj1 ix_list_properties).
+    (* forall i : Fin (S dim), get (hd 0 (` ix) - hd 0 (` shape1) :: tl (` ix)) (` i) < get (` shape2) (` i) *)
+    + intro i; destruct i as [i_val i_val_lt_Sdim]; destruct i_val as [|i_val]; simpl.
+      (* get (hd 0 (` ix) - hd 0 (` shape1) :: tl (` ix)) 0 < get (` shape2) 0 *)
+      - unfold get; simpl.
+        destruct ix as [ix_list ix_list_properties]; simpl.
+        pose proof (proj2 ix_list_properties (exist _ 0 i_val_lt_Sdim)) as proof; unfold get in proof; simpl in proof.
+        destruct ix_list as [|ix_list_O ix_list'].
+        (* absurd *)
+        * exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+        (* ix_list_O - hd 0 (` shape1) < nth 0 (` shape2) 0 *)
+        * simpl; simpl in proof. destruct shape2 as [shape_list2 shape_list2_has_length_Sdim].
+          destruct shape_list2 as [|shape_list2_O shape_list2']; simpl; simpl in proof.
+          (* absurd *)
+          ++ exfalso; apply (Nat.neq_0_succ _ shape_list2_has_length_Sdim).
+          (* ix_list_O - hd 0 (` shape1) < shape_list2_O *)
+          ++ simpl; simpl in Heq_anonymous; simpl in ix_list_properties.
+             apply (proj2 (Nat.add_le_mono_r (S (ix_list_O - hd 0 (` shape1))) shape_list2_O (hd 0 (` shape1)))); simpl.
+             rewrite Nat.sub_add.
+             (* S ix_list_O <= shape_list2_O + hd 0 (` shape1) *)
+             -- rewrite Nat.add_comm.
+                exact proof.
+             (* hd 0 (` shape1) <= ix_list_O *)
+             -- apply (not_lt _ _ (proj1 (Nat.ltb_nlt _ _) (eq_sym Heq_anonymous))).
+      (* get (hd 0 (` ix) - hd 0 (` shape1) :: tl (` ix)) (S i_val) < get (` shape2) (S i_val) *)
+      - unfold get; simpl.
+        destruct ix as [ix_list ix_list_properties]; simpl.
+        simpl in Heq_anonymous.
+        unfold cat_shape in ix_list_properties; simpl in ix_list_properties.
+        pose proof (proj2 ix_list_properties (exist _ (S i_val) i_val_lt_Sdim)) as proof.
+        unfold get in proof; simpl in proof.
+        destruct shape2 as [shape_list2 shape_list2_has_length_Sdim].
+        destruct shape_list2 as [|shape_list2_O shape_list2'].
+        (* absurd *)
+        * exfalso; apply (Nat.neq_0_succ _ shape_list2_has_length_Sdim).
+        (* nth i_val (tl ix_list) 0 < nth i_val shape_list2' 0 *)
+        * simpl. injection eq_tl_shapes as tl_shape1_eq_shape_list2'.
+          destruct ix_list as [|ix_list_O ix_list'].
+          (* absurd *)
+          ++ exfalso; apply (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+          (* nth i_val (tl (ix_list_O :: ix_list')) 0 < nth i_val shape_list2' 0 *)
+          ++ rewrite tl_shape1_eq_shape_list2' in proof. exact proof.
+  Defined.
+
+  (* Properties about cat *)
+  (* 1. cat (take n A) (drop n A) = A *)
+  Lemma tail_shape_take_is_tail_shape {dim} : forall (shape: Shape (S dim)) (n: Fin (S (hd 0 (` shape)))),
+    tail_shape (take_shape shape n) = tail_shape shape.
+  Proof.
+    intros shape n.
+    unfold tail_shape.
+    f_equal.
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    - exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    (*
+      eq_add_S (length shape_list') dim shape_list_has_length_Sdim =
+      eq_add_S (length shape_list') dim shape_list_has_length_Sdim
+     *)
+    - simpl. reflexivity.
+  Qed.
+
+  Lemma tail_shape_drop_is_tail_shape {dim} : forall (shape: Shape (S dim)) (n: Fin (S (hd 0 (` shape)))),
+    tail_shape (drop_shape shape n) = tail_shape shape.
+  Proof.
+    intros shape n.
+    unfold tail_shape.
+    f_equal.
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    - exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    (*
+      eq_add_S (length shape_list') dim shape_list_has_length_Sdim =
+      eq_add_S (length shape_list') dim shape_list_has_length_Sdim
+     *)
+    - simpl. reflexivity.
+  Qed.
+
+  Print eq_trans.
+  Theorem cat_take_drop_shape {dim} : forall (shape: Shape (S dim)) (n: Fin (S (hd 0 (` shape)))),
+    cat_shape (take_shape shape n) (drop_shape shape n)
+      (eq_trans (tail_shape_take_is_tail_shape shape n) (eq_sym (tail_shape_drop_is_tail_shape shape n)))
+    = shape.
+  Proof.
+    intros shape n.
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    - exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    - unfold take_shape; unfold drop_shape; unfold cat_shape. simpl.
+      rewrite (UIP_refl _ _ _); simpl.
+      simpl in n. destruct n as [n_val n_lt_Sshape_list_O]; simpl.
+      assert (n_val + (shape_list_O - n_val) = shape_list_O) as n_plus_shape_list_O_minus_n_is_shape_list_O.
+      (* n_val + (shape_list_O - n_val) *)
+      + apply le_plus_minus_r.
+        apply (le_S_n _ _ n_lt_Sshape_list_O).
+      + rewrite n_plus_shape_list_O_minus_n_is_shape_list_O. reflexivity.
+  Qed.
+
+  (* From http://adam.chlipala.net/cpdt/html/Match.html *)
+  Ltac find_if_inside :=
+    match goal with
+      | [ |- context[if ?X then _ else _] ] => destruct X
+    end.
+
+
+  Theorem cat_take_drop {dim} {shape: Shape (S dim)} :
+    forall (array: Array E shape) (n: Fin (S (hd 0 (` shape)))),
+      transport
+        (cat (take n array) (drop n array) (eq_trans (tail_shape_take_is_tail_shape shape n)
+             (eq_sym (tail_shape_drop_is_tail_shape shape n))))
+        (cat_take_drop_shape shape n)
+      = array.
+  Proof.
+    intros array n.
+    remember (take n array) as t_array.
+    remember (drop n array) as d_array.
+    destruct shape as [shape_list shape_list_has_length_Sdim].
+    simpl in n.
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    - exfalso; apply (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+    (* *)
+    - simpl in n; destruct n as [n_val n_val_lt_Sshape_list_O].
+        unfold transport.
+        generalize dependent (cat_take_drop_shape
+          (exist (fun s : list nat => length s = S dim) (shape_list_O :: shape_list') shape_list_has_length_Sdim)
+          (exist (fun i : nat => i < S shape_list_O) n_val n_val_lt_Sshape_list_O)).
+        unfold cat_shape; simpl. unfold take_shape; unfold drop_shape; simpl.
+        assert (n_val + (shape_list_O - n_val) = shape_list_O) as rew_proof.
+        (* n_val + (shape_list_O - n_val) *)
+        * apply le_plus_minus_r.
+          apply (le_S_n _ _ n_val_lt_Sshape_list_O).
+        * rewrite (UIP_refl _ _ _); simpl.
+          generalize dependent t_array.
+          unfold take_shape; simpl. intros t_array t_array_value.
+          generalize dependent d_array.
+          unfold drop_shape; simpl. intros d_array d_array_value.
+          remember (cat t_array d_array eq_refl) as cat_array.
+          unfold cat_shape in cat_array; simpl in cat_array.
+          generalize dependent cat_array.
+          unfold cat; simpl.
+          unfold cat_shape; simpl.
+          unfold eq_ind_r; unfold eq_sym; unfold eq_ind; simpl.
+          generalize dependent (cat_obligation_1 dim
+           (exist (fun s : list nat => length s = S dim) (n_val :: shape_list') shape_list_has_length_Sdim)
+           (exist (fun s : list nat => length s = S dim) (shape_list_O - n_val :: shape_list')
+              shape_list_has_length_Sdim) t_array eq_refl).
+          generalize dependent (cat_obligation_2 dim
+           (exist (fun s : list nat => length s = S dim) (n_val :: shape_list') shape_list_has_length_Sdim)
+           (exist (fun s : list nat => length s = S dim) (shape_list_O - n_val :: shape_list')
+              shape_list_has_length_Sdim) d_array eq_refl).
+          unfold cat_shape; simpl.
+          rewrite rew_proof; simpl.
+          intros oblig2 oblig1 cat_array Heq_cat_array e_refl.
+          rewrite (UIP_refl _ _ _).
+          assert (forall ix, cat_array ix = array ix) as pointwise_proof.
+          (* *)
+          -- intro ix.
+             rewrite Heq_cat_array; simpl.
+             clear e_refl; clear rew_proof.
+             generalize (oblig1 ix); generalize (oblig2 ix).
+             generalize (@eq_refl bool
+              (Nat.ltb
+                 (@hd nat O
+                    (@proj1_sig (list nat)
+                       (fun ix0 : list nat =>
+                        and (@eq nat (@length nat ix0) (S dim))
+                          (forall i : Fin (S dim),
+                           lt (get ix0 (@proj1_sig nat (fun i0 : nat => lt i0 (S dim)) i))
+                             (get (@cons nat shape_list_O shape_list') (@proj1_sig nat (fun i0 : nat => lt i0 (S dim)) i))))
+                       ix)) n_val)).
+             case_eq (Nat.ltb
+               (@hd nat O
+                  (@proj1_sig (list nat)
+                     (fun ix0 : list nat =>
+                      and (@eq nat (@length nat ix0) (S dim))
+                        (forall i : Fin (S dim),
+                         lt (get ix0 (@proj1_sig nat (fun i0 : nat => lt i0 (S dim)) i))
+                           (get (@cons nat shape_list_O shape_list') (@proj1_sig nat (fun i0 : nat => lt i0 (S dim)) i)))) ix))
+               n_val).
+             (* (hd 0 (` ix) <? n_val) = true *)
+             ++ intros hd_ix_O_lt_n_val_bool eq_refl' junk take_ix_proof_fn.
+                rewrite t_array_value; unfold take; simpl.
+                f_equal.
+                destruct ix as [ix_list ix_list_properties]; simpl.
+                rewrite (proof_irrelevance _ _ ix_list_properties).
+                reflexivity.
+             (* (hd 0 (` ix) <? n_val) = true *)
+             ++ intros hd_ix_O_lt_n_val_bool eq_refl' drop_ix_proof_fn junk.
+                rewrite d_array_value.
+                destruct ix as [ix_list ix_list_properties]. simpl.
+                clear junk cat_array Heq_cat_array oblig1 oblig2.
+                simpl in drop_ix_proof_fn; simpl in hd_ix_O_lt_n_val_bool.
+                unfold drop; simpl.
+                pose proof (proj1 (Nat.ltb_ge _ _) hd_ix_O_lt_n_val_bool) as n_val_lt_hd_ix_O.
+                generalize (drop_obligation_1 dim
+                  (exist (fun s : list nat => length s = S dim) (shape_list_O :: shape_list') shape_list_has_length_Sdim)
+                  (exist (fun i : nat => i < S shape_list_O) n_val n_val_lt_Sshape_list_O) array
+                  (exist
+                     (fun ix : list nat =>
+                      length ix = S dim /\
+                      (forall i : Fin (S dim), get ix (` i) < get (shape_list_O - n_val :: shape_list') (` i)))
+                     (hd 0 ix_list - n_val :: tl ix_list) (drop_ix_proof_fn eq_refl'))); simpl.
+                rewrite (Nat.sub_add _ _ n_val_lt_hd_ix_O).
+                destruct ix_list as [|ix_list_O ix_list'].
+                (* absurd *)
+                ** contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+                ** intro junk_proof; rewrite (proof_irrelevance _ _ ix_list_properties).
+                   reflexivity.
+          -- apply (functional_extensionality _ _ pointwise_proof).
+  Defined.
+
 
   (* TODO: finish core *)
 End Array.
