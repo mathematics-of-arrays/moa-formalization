@@ -813,6 +813,230 @@ Section Array.
           -- apply (functional_extensionality _ _ pointwise_proof).
   Defined.
 
+  Program Fixpoint replace_nth {A: Type} (n: nat) (l: list A) (new: A): list A :=
+    match n, l with
+      | O, nil => nil
+      | O, l_O :: l' => new :: l'
+      | S n', l_O :: l' => l_O :: replace_nth n' l' new
+      | S n', nil => nil
+    end.
+
+  Lemma replace_nth_length_invariant {A: Type} : forall (n: nat) (l: list A) (new: A),
+    length (replace_nth n l new) = length l.
+  Proof.
+    intros n.
+    induction n as [|n'].
+    (* length (replace_nth 0 l new) = length l *)
+    + intros l new. destruct l as [|l_O l'].
+      (* length (replace_nth 0 nil new) = length nil *)
+      - unfold replace_nth. reflexivity.
+      (* length (replace_nth 0 (l_O :: l') new) = length (l_O :: l') *)
+      - unfold replace_nth. reflexivity.
+    (* length (replace_nth (S n') l new) = length l *)
+    + intros l new. destruct l as [|l_O l'].
+      (* length (replace_nth (S n') nil new) = length nil *)
+      - unfold replace_nth. reflexivity.
+      (* length (replace_nth (S n') (l_O :: l') new) = length (l_O :: l') *)
+      - simpl. rewrite (IHn' l' new); reflexivity.
+  Qed.
+
+  Lemma replace_nth_only_modifies_nth_component : forall (n: nat) (l: list nat) (new: nat) (k: nat),
+    ~ k = n -> get (replace_nth n l new) k = get l k.
+  Proof.
+    intros n l new k neq_k_n.
+    generalize dependent n. generalize dependent l.
+    induction k as [|k' IHk].
+    (* get (replace_nth n l new) 0 = get l 0 *)
+    * intros l n neq_k_n. destruct l as [|l_O l'].
+      (* get (replace_nth n nil new) 0 = get nil 0 *)
+      + destruct n as [|n'].
+        - simpl; reflexivity.
+        - simpl; reflexivity.
+      (* get (replace_nth n (l_O :: l') new) 0 = get (l_O :: l') 0 *)
+      + destruct n as [|n'].
+        - contradiction (neq_k_n eq_refl).
+        - unfold get; reflexivity.
+    (* get (replace_nth n l new) (S k') = get l (S k') *)
+    * intros l n neq_k_n. destruct l as [|l_O l'].
+      (* get (replace_nth n nil new) (S k') = get nil (S k') *)
+      + destruct n as [|n'].
+        - simpl; reflexivity.
+        - simpl; reflexivity.
+      (* get (replace_nth n (l_O :: l') new) (S k') = get (l_O :: l') (S k') *)
+      + destruct n as [|n'].
+        - unfold get; reflexivity.
+        - unfold not in neq_k_n.
+          assert (k' <> n') as neq_k'_n'.
+          -- intro eq_k'_n'. apply (neq_k_n (eq_S _ _ eq_k'_n')).
+          -- unfold get in IHk. unfold get; simpl.
+             apply (IHk l' n' neq_k'_n').
+  Qed.
+
+  Lemma contraposition : forall (P Q: Prop), (P -> Q) -> (~Q -> ~P).
+  Proof.
+    intros P Q P_implies_Q Q_implies_False wit_P. apply (Q_implies_False (P_implies_Q wit_P)).
+  Qed.
+
+  Program Definition rot_i_right {dim} {shape: Shape (S dim)} (axis: Fin (S dim))
+      (offset: Fin (S (get (` shape) (` axis)))) (array: Array E shape): Array E shape :=
+    let shape_axis := get (` shape) (` axis) in
+    fun ix => array (exist _ (replace_nth (` axis) (` ix)
+                                          ((get (` ix) (` axis) + shape_axis - offset) mod shape_axis)) _).
+  Next Obligation. split.
+    (*
+      length
+        (replace_nth (` axis) (` ix) ((get (` ix) (` axis) + get (` shape) (` axis) - ` offset) mod get (` shape) (` axis))) =
+      S dim
+     *)
+    * rewrite replace_nth_length_invariant. destruct ix as [ix_list ix_list_properties]; simpl.
+      exact (proj1 ix_list_properties).
+    (* *)
+    * intro i.
+      clear array.
+      remember (tail_ix ix) as wit_tail_ix.
+      destruct ix as [ix_list ix_list_properties]; simpl.
+      destruct axis as [axis_val axis_lt_Sdim]; simpl.
+      destruct i as [i_val i_lt_Sdim]; simpl; simpl in ix_list_properties.
+      case_eq (i_val ?= axis_val).
+      (* *)
+      + intro wit_eq_i_val_axis_val. pose proof (Nat.compare_eq _ _ wit_eq_i_val_axis_val) as eq_i_val_axis_val.
+        rewrite eq_i_val_axis_val.
+        clear i_val i_lt_Sdim eq_i_val_axis_val wit_eq_i_val_axis_val.
+        generalize dependent ix_list. generalize dependent dim.
+        induction axis_val.
+        (* *)
+        - intros dim shape axis_lt_Sdim offset wit_tail_ix ix_list ix_list_properties wit_tail_ix_is_tail_ix.
+          destruct shape as [shape_list shape_list_has_length_Sdim]; simpl; simpl in offset.
+          destruct shape_list as [|shape_list_O shape_list'].
+          (* absurd *)
+          -- contradiction (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+          -- destruct ix_list as [|ix_list_O ix_list'].
+            (* absurd *)
+            ++ contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+            ++ unfold get; simpl. apply Nat.mod_upper_bound.
+               intro eq_shape_list_O_O. unfold tail_ix in wit_tail_ix_is_tail_ix;
+               simpl in wit_tail_ix_is_tail_ix.
+               generalize ((tail_ix_obligation_1 dim
+                              (exist (fun s : list nat => length s = S dim) (shape_list_O :: shape_list')
+                                 shape_list_has_length_Sdim)
+                              (exist
+                                 (fun ix : list nat =>
+                                  length ix = S dim /\
+                                  (forall i : Fin (S dim), get ix (` i) < get (shape_list_O :: shape_list') (` i)))
+                                 (ix_list_O :: ix_list') ix_list_properties))). simpl.
+               intro proof. rewrite (proof_irrelevance _ _ proof) in wit_tail_ix_is_tail_ix.
+               rewrite eq_shape_list_O_O in ix_list_properties.
+               pose proof (proj2 ix_list_properties (exist _ O axis_lt_Sdim)) as inconsistent.
+               unfold get in inconsistent; simpl in inconsistent.
+               contradiction (Nat.nle_succ_0 _ inconsistent).
+        - intros dim shape axis_lt_Sdim offset wit_tail_ix ix_list ix_list_properties.
+          destruct shape as [shape_list shape_list_has_length_Sdim]; simpl; simpl in offset.
+          destruct shape_list as [|shape_list_O shape_list'].
+          (* absurd *)
+          -- contradiction (Nat.neq_0_succ _ shape_list_has_length_Sdim).
+          -- destruct ix_list as [|ix_list_O ix_list'].
+            (* absurd *)
+            ++ contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+            ++ unfold get; simpl; simpl in ix_list_properties.
+               destruct dim as [|dim'].
+               (* absurd *)
+               ** contradiction (Nat.nle_succ_0 _ (le_S_n _ _ axis_lt_Sdim)).
+               ** destruct shape_list' as [|shape_list'_O shape_list''].
+                 (* absurd *)
+                 --- contradiction (Nat.neq_0_succ _ (eq_add_S _ _ shape_list_has_length_Sdim)).
+                 --- assert (length (shape_list'_O :: shape_list'') = S dim') as shape_list_has_length_Sdim_simpl.
+                     +++ simpl; simpl in shape_list_has_length_Sdim.
+                         apply (eq_add_S _ _ shape_list_has_length_Sdim).
+                     +++ intro wit_tail_ix_is_tail_ix.
+                         unfold tail_ix in wit_tail_ix_is_tail_ix; simpl in wit_tail_ix_is_tail_ix.
+                         generalize (tail_ix_obligation_1 (S dim')
+                              (exist (fun s : list nat => length s = S (S dim'))
+                                 (shape_list_O :: shape_list'_O :: shape_list'') shape_list_has_length_Sdim)
+                              (exist
+                                 (fun ix : list nat =>
+                                  length ix = S (S dim') /\
+                                  (forall i : Fin (S (S dim')),
+                                   nth (` i) ix 0 <
+                                   match ` i with
+                                   | 0 => shape_list_O
+                                   | 1 => shape_list'_O
+                                   | S (S m0) => nth m0 shape_list'' 0
+                                   end)) (ix_list_O :: ix_list') ix_list_properties)). simpl.
+                         intro ix_list'_properties. rewrite (proof_irrelevance _ _ ix_list'_properties) in wit_tail_ix_is_tail_ix.
+                         remember (tail_ix wit_tail_ix) as wit_tail_tail_ix.
+                         rewrite wit_tail_ix_is_tail_ix in Heqwit_tail_tail_ix.
+                         unfold tail_ix in Heqwit_tail_tail_ix.
+                         simpl in Heqwit_tail_tail_ix.
+                         generalize (tail_ix_obligation_1 dim'
+                           (tail_shape
+                              (exist (fun s : list nat => length s = S (S dim'))
+                                 (shape_list_O :: shape_list'_O :: shape_list'') shape_list_has_length_Sdim))
+                           (exist
+                              (fun ix : list nat =>
+                               length ix = S dim' /\
+                               (forall i : Fin (S dim'), get ix (` i) < get (shape_list'_O :: shape_list'') (` i)))
+                              ix_list' ix_list'_properties)).
+                         simpl. intro tl_ix_list'_properties.
+                         rewrite (proof_irrelevance _ _ tl_ix_list'_properties) in Heqwit_tail_tail_ix.
+                         pose proof (IHaxis_val dim'
+                                                (exist _ (shape_list'_O :: shape_list'') shape_list_has_length_Sdim_simpl)
+                                                (le_S_n _ _ axis_lt_Sdim)
+                                                offset
+                                                wit_tail_tail_ix
+                                                ix_list' 
+                                                ix_list'_properties
+                                                ) as f_result.
+                         unfold tail_ix in f_result. simpl in f_result.
+                         rewrite (proof_irrelevance _ _ tl_ix_list'_properties) in f_result.
+                         pose proof (f_result Heqwit_tail_tail_ix) as proof.
+                         unfold get in proof. exact proof.
+      + intro wit_i_val_lt_axis_val.
+        assert ((i_val ?= axis_val) <> Eq) as wit_i_val_neq_axis_val.
+        - rewrite wit_i_val_lt_axis_val; discriminate.
+        - Search ((?x ?= ?y)). Search (((?y -> False) -> (?x -> False)) <-> (?x -> ?y)).
+          Check Nat.compare_eq_iff.
+          pose proof ((fun n m => contraposition _ _ (proj2 (Nat.compare_eq_iff n m))) _ _ wit_i_val_neq_axis_val) as i_val_neq_axis_val.
+          rewrite (replace_nth_only_modifies_nth_component _ _ _ _ i_val_neq_axis_val).
+          apply (proj2 ix_list_properties (exist _ i_val i_lt_Sdim)).
+      + intro wit_i_val_lt_axis_val.
+        assert ((i_val ?= axis_val) <> Eq) as wit_i_val_neq_axis_val.
+        - rewrite wit_i_val_lt_axis_val; discriminate.
+        - Search ((?x ?= ?y)). Search (((?y -> False) -> (?x -> False)) <-> (?x -> ?y)).
+          Check Nat.compare_eq_iff.
+          pose proof ((fun n m => contraposition _ _ (proj2 (Nat.compare_eq_iff n m))) _ _ wit_i_val_neq_axis_val) as i_val_neq_axis_val.
+          rewrite (replace_nth_only_modifies_nth_component _ _ _ _ i_val_neq_axis_val).
+          apply (proj2 ix_list_properties (exist _ i_val i_lt_Sdim)).
+  Qed.
+
+
+(*
+  Program Definition rot0_right {dim} {shape: Shape (S dim)} (offset: Fin (S (hd 0 (` shape))))
+      (array: Array E shape): Array E shape :=
+    cat (take_neg offset array) (drop_neg offset array) _.
+  Next Obligation. split.
+    (* length (` x) = S dim *)
+    * destruct x as [ix_list ix_list_properties]. exact (proj1 ix_list_properties).
+    (* forall i : Fin (S dim), get (` x) (` i) < get (` offset + (hd 0 (` shape) - ` offset) :: tl (` shape)) (` i) *)
+    * intro i. destruct i as [i_val i_val_lt_Sdim]; simpl.
+      destruct shape as [shape_list shape_list_has_length_Sdim].
+      destruct shape_list as [|shape_list_O shape_list'].
+      (* absurd *)
+      - contradiction (Nat.neq_0_succ _ shape_list_has_length_Sdim). 
+      (* get (` x) i_val < get (` offset + (shape_list_O - ` offset) :: shape_list') i_val *)
+      - simpl. destruct x as [ix_list ix_list_properties]; simpl. 
+        destruct ix_list as [|ix_list_O ix_list'].
+        (* absurd *)
+        + contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+        (* get (ix_list_O :: ix_list') i_val < get (` offset + (shape_list_O - ` offset) :: shape_list') i_val *)
+        + destruct offset as [offset_val offset_val_lt_hd_O_shape]; simpl; simpl in offset_val_lt_hd_O_shape.
+          rewrite (Nat.add_sub_assoc _ _ _ (le_S_n _ _ offset_val_lt_hd_O_shape)).
+          rewrite (Nat.add_sub_swap offset_val _ offset_val (le_refl offset_val)).
+          rewrite Nat.sub_diag.
+          rewrite Nat.add_0_l.
+          apply (proj2 ix_list_properties (exist _ i_val i_val_lt_Sdim)).
+  Defined.
+*)
+
 
   (* TODO: finish core *)
 End Array.
