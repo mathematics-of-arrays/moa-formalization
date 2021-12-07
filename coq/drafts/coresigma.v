@@ -1008,7 +1008,224 @@ Section Array.
           apply (proj2 ix_list_properties (exist _ i_val i_lt_Sdim)).
   Qed.
 
+  (* Content from the paper *)
 
+  (* The definitions below are implemented from the text of the paper at <> *)
+
+  (* 5.1 *)
+
+  (* Definition 2 *)
+
+  (* For our purposes, we need to define a new type of arrays ("PaddedArray"s) that carry shape information of
+     one of their slices. To use our previously defined operations, we also define two projection functions:
+      - inner, that returns the annotated array slice
+      - outer, that returns the whole array stripped of its additional inner shape information
+  *)
+
+  (* An inner shape consists of a list of pairs (s_i, e_i), as described in the paper. *)
+  Definition InnerShape {dim} (outer_shape: Shape dim) :=
+    { s_e: list (nat * nat)
+      |  length s_e = dim
+      /\ forall (i: Fin dim), (  fst (nth (` i) s_e (0, 0)) <= snd (nth (` i) s_e (0, 0))
+                              /\ snd (nth (` i) s_e (0, 0)) <= get (` outer_shape) (` i)) }.
+
+  Definition PaddedArray {dim} E (outer_shape: Shape dim) :=
+    prod (Array E outer_shape) (InnerShape outer_shape).
+
+  Definition outer {dim} {outer_shape: Shape dim} (padded_array: PaddedArray E outer_shape)
+      : Array E outer_shape :=
+    fst padded_array.
+
+  Program Definition inner_shape_to_shape {dim} {outer_shape: Shape dim} (inner_shape: InnerShape outer_shape)
+      : Shape dim :=
+    map (fun start_and_end => snd start_and_end - fst start_and_end) inner_shape.
+  Next Obligation. (* length (map (fun start_and_end : nat * nat => snd start_and_end - fst start_and_end) (` inner_shape)) = dim *)
+    rewrite map_length.
+    destruct inner_shape as [inner_shape_list inner_shape_list_properties].
+    simpl. exact (proj1 inner_shape_list_properties).
+  Defined.
+
+  (* Helper functions *)
+
+  Fixpoint zip {A B} (l1: list A) (l2: list B): list (A * B) :=
+    match l1, l2 with | nil, _ => nil
+                      | _, nil => nil
+                      | a :: l1', b :: l2' => (a, b) :: zip l1' l2' end.
+
+  Lemma eq_zip_length_l {A B} : forall (l1: list A) (l2: list B),
+    length l1 = length l2 -> length (zip l1 l2) = length l1.
+  Proof.
+    intro l1.
+    induction l1 as [|a l1' IHl1].
+    (* length (zip nil l2) = length nil *)
+    * unfold zip. reflexivity.
+    (* length (zip (a :: l1) l2) = length (a :: l1) *)
+    * intros l2 eq_length_l1_l2.
+      destruct l2 as [|b l2'].
+      (* absurd *)
+      + simpl in eq_length_l1_l2. contradiction (Nat.neq_succ_0 _ eq_length_l1_l2).
+      (* length (zip (a :: l1') (b :: l2')) = length (a :: l1') *)
+      + simpl; simpl in eq_length_l1_l2.
+        rewrite (IHl1 l2' (eq_add_S _ _ eq_length_l1_l2)).
+        reflexivity.
+  Defined.
+
+  Program Definition tail_inner_shape {dim} {outer_shape: Shape (S dim)} (inner_shape: InnerShape outer_shape)
+      : InnerShape (tail_shape outer_shape) :=
+    exist _ (tl (` inner_shape)) _.
+  Next Obligation. split.
+    (* length (tl (` inner_shape)) = dim *)
+    * destruct inner_shape as [inner_shape_list inner_shape_list_properties]; simpl.
+      destruct inner_shape_list as [|inner_shape_list_O inner_shape_list'].
+      (* absurd *)
+      - contradiction (Nat.neq_0_succ _ (proj1 inner_shape_list_properties)).
+      (* inner_shape_list = inner_shape_list_O :: inner_shape_list' *)
+      - simpl. apply (Nat.succ_inj _ _ (proj1 inner_shape_list_properties)).
+      (*
+        forall i : Fin dim,
+        fst (nth (` i) (tl (` inner_shape)) (0, 0)) <= snd (nth (` i) (tl (` inner_shape)) (0, 0)) <=
+        get (tl (` outer_shape)) (` i)
+      *)
+    * intro i.
+      destruct inner_shape as [inner_shape_list inner_shape_list_properties]. simpl. 
+      destruct inner_shape_list as [|inner_shape_list_O inner_shape_list'].
+      (* absurd *)
+      - contradiction (Nat.neq_0_succ _ (proj1 inner_shape_list_properties)).
+      (* inner_shape_list = inner_shape_list_O :: inner_shape_list' *)
+      - destruct i as [i_val ival_lt_dim]; simpl.
+        apply le_n_S in ival_lt_dim.
+        pose proof (proj2 inner_shape_list_properties (exist _ (S i_val) ival_lt_dim)) as proof.
+        destruct outer_shape as [outer_shape_list outer_shape_has_length_Sdim]; simpl.
+        destruct outer_shape_list as [|outer_shape_list_O outer_shape_list'].
+        (* absurd *)
+        + contradiction (Nat.neq_0_succ _ outer_shape_has_length_Sdim).
+        (* outer_shape_list = outer_shape_list_O :: outer_shape_list' *)
+        + exact proof.
+  Defined.
+
+  Program Definition inner {dim} {outer_shape: Shape dim} (padded_array: PaddedArray E outer_shape)
+      : Array E (inner_shape_to_shape (snd padded_array)) :=
+    let outer_array := fst padded_array in
+    let starts := map fst (snd padded_array) in
+    let add_all := map (fun tx => fst tx + snd tx) in
+    fun ix => outer_array (exist _ (add_all (zip starts ix)) _).
+  Next Obligation. split.
+    (* length (map (fun tx : nat * nat => fst tx + snd tx) (zip (map fst (` (snd padded_array))) (` ix))) = dim *)
+    * rewrite map_length.
+      destruct padded_array as [outer_array inner_shape]; simpl.
+      destruct inner_shape as [inner_shape_list inner_shape_list_properties].
+      destruct ix as [ix_list ix_list_properties].
+      simpl; simpl in ix_list_properties.
+      pose proof (eq_trans (eq_trans (map_length fst inner_shape_list) (proj1 inner_shape_list_properties))
+                           (eq_sym (proj1 ix_list_properties))) as inner_helper.
+      rewrite (eq_zip_length_l _ _ inner_helper).
+      rewrite map_length.
+      exact (proj1 inner_shape_list_properties).
+    * intro i.
+      unfold get.
+      Check map_nth.
+      remember (fun tx : nat * nat => fst tx + snd tx) as add_tup.
+      assert (0 = add_tup (0, 0)) as eq_O_add_tup_OO.
+      (* 0 = add_tup (0, 0) *)
+      + rewrite Heqadd_tup; simpl. reflexivity.
+      + destruct padded_array as [array inner_shape]. simpl.
+        simpl in ix.
+        clear array.
+        destruct i as [i_val i_lt_dim]. simpl.
+        generalize dependent dim.
+        generalize dependent i_val. induction i_val.
+        ** intros dim outer_shape inner_shape ix O_lt_dim.
+           destruct inner_shape as [inner_shape_list inner_shape_list_properties]; simpl.
+           destruct ix as [ix_list ix_list_properties]; simpl.
+           simpl in ix_list_properties.
+           rewrite eq_O_add_tup_OO.
+           rewrite map_nth.
+           rewrite Heqadd_tup. simpl.
+           pose proof (proj2 ix_list_properties (exist _ O O_lt_dim)) as proof. simpl in proof.
+           remember (nth O (zip (map fst inner_shape_list) ix_list) (0, 0)) as nth_tuple.
+           destruct inner_shape_list as [|inner_shape_list_O inner_shape_list']; simpl.
+           (* absurd *)
+           - rewrite <- (proj1 inner_shape_list_properties) in O_lt_dim; simpl in O_lt_dim.
+             contradiction (Nat.nlt_0_r _ O_lt_dim).
+           (* inner_shape_list = inner_shape_list_O :: inner_shape_list' *)
+           - destruct ix_list as [|ix_list_O ix_list'].
+             (* absurd *)
+             -- rewrite <- (proj1 ix_list_properties) in O_lt_dim; simpl in O_lt_dim.
+                contradiction (Nat.nlt_0_r _ O_lt_dim).
+             (* ix_list = ix_list_O :: ix_list_' *)
+             -- destruct inner_shape_list_O as [inner_shape_list_O_l inner_shape_list_O_r].
+                simpl in Heqnth_tuple. rewrite Heqnth_tuple; simpl.
+                unfold get in proof; simpl in proof.
+                destruct outer_shape as [outer_shape_list outer_shape_list_has_length_dim]; simpl.
+                destruct outer_shape_list as [|outer_shape_list_O outer_shape_list'].
+                (* absurd *)
+                ++ rewrite <- outer_shape_list_has_length_dim in O_lt_dim; simpl in O_lt_dim.
+                   contradiction (Nat.nlt_0_r _ O_lt_dim).
+                (* outer_shape_list = outer_shape_list_O :: outer_shape_list' *)
+                ++ simpl.
+                   pose proof (proj2 inner_shape_list_properties (exist _ O O_lt_dim)) as bounds_order.
+                   unfold get in bounds_order; simpl in bounds_order.
+                   apply (plus_le_compat_r _ _ inner_shape_list_O_l) in proof.
+                   rewrite (Nat.sub_add _ _ (proj1 bounds_order)) in proof.
+                   unfold get in bounds_order; simpl in bounds_order.
+                   rewrite Nat.add_succ_l in proof.
+                   rewrite Nat.add_comm in proof.
+                   exact (le_trans _ _ _ proof (proj2 bounds_order)).
+        ** intros dim outer_shape inner_shape ix S_ival_lt_dim. simpl in ix.
+           destruct dim as [|dim'].
+           (* absurd *)
+           - contradiction (Nat.nle_succ_0 _ S_ival_lt_dim).
+           (* dim = S dim' *)
+           - pose (tail_inner_shape inner_shape) as tl_inner_shape.
+             pose (tail_shape outer_shape) as tl_outer_shape.
+             pose (tail_ix ix) as tl_ix.
+             destruct inner_shape as [inner_shape_list inner_shape_list_properties]; simpl.
+             destruct ix as [ix_list ix_list_properties]; simpl.
+             destruct inner_shape_list as [|inner_shape_list_O inner_shape_list'].
+             (* absurd *)
+             -- contradiction (Nat.neq_0_succ _ (proj1 inner_shape_list_properties)).
+             (* inner_shape_list = inner_shape_list_O :: inner_shape_list' *)
+             -- rewrite eq_O_add_tup_OO. rewrite map_nth.
+                destruct ix_list as [|ix_list_O ix_list'].
+                (* absurd *)
+                ++ contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)).
+                (* ix_list = ix_list_O :: ix_list' *)
+                ++ simpl.
+                   rewrite <- (map_nth add_tup _ _ i_val).
+                   pose proof (IHi_val dim' tl_outer_shape tl_inner_shape tl_ix (le_S_n _ _ S_ival_lt_dim)) as proof.
+                   unfold tail_ix in tl_ix. simpl in tl_ix. simpl in proof.
+                   destruct outer_shape as [outer_shape_list outer_shape_list_has_length_Sdim'].
+                   destruct outer_shape_list as [|outer_shape_list_O outer_shape_list'].
+                   (* absurd *)
+                   +++ contradiction (Nat.neq_0_succ _ outer_shape_list_has_length_Sdim').
+                   (* outer_shape_list = outer_shape_list_O :: outer_shape_list' *)
+                   +++ simpl; simpl in proof. rewrite <- eq_O_add_tup_OO.
+                       exact proof.
+  Defined.
+  Next Obligation.
+                   
+                   rewrite <- map_nth.  simpl.
+ Check map_nth. rewrite <- map_nth. simpl. Search (0 = S ?x).
+             simpl in ix_list_properties.
+pose proof (IHi_val dim' (tail_shape outer_shape)
+           pose (tail_ix ix) as tl_ix. proof Heqnth_tuple.
+        
+                exact H.
+                Search (S ?x + ?y = S (?x + ?y)).
+                Search (?x - ?m + ?m). Search (?x <= ?y -> ?x + ?z <= ?y + ?z).
+        unfold fst.
+        simpl.
+        pattern 0 at 2. rewrite H. simpl.
+      pose proof ((fun tx : nat * nat => fst tx + snd tx)fst (0, 0) + 0 = 0).
+      rewrite map_nth.
+
+  Defined.
+  Definition PaddedShape {dim}
+  Definition PaddedArray {dim} E (padded_shape: PaddedShape (S dim)) 
+
+  Definition Shape dim := { s: list nat | length s = dim }.
+Definition Array {dim} E (shape : Shape dim) :=
+    Index shape -> E.
 (*
   Program Definition rot0_right {dim} {shape: Shape (S dim)} (offset: Fin (S (hd 0 (` shape))))
       (array: Array E shape): Array E shape :=
