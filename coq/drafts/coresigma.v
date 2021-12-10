@@ -840,6 +840,29 @@ Section Array.
       - simpl. rewrite (IHn' l' new); reflexivity.
   Qed.
 
+  Lemma replace_nth_modifies_nth_component : forall (n: nat) (l: list nat) (new: nat) (k: nat),
+    k = n -> n < length l -> get (replace_nth n l new) k = new.
+  Proof.
+    intros n l new k. generalize dependent n. generalize dependent l.
+    induction k as [|k' IHk].
+    (* get (replace_nth n l new) 0 = new *)
+    * intros l n eq_O_n lt_n_length_l. destruct l as [|l_O l'].
+      (* absurd *)
+      + contradiction (Nat.nle_succ_0 _ lt_n_length_l).
+      (* get (replace_nth n (l_O :: l') new) 0 = new *)
+      + rewrite <- eq_O_n; unfold get; simpl. reflexivity.
+    (* get (replace_nth n l new) (S k') = new *)
+    * intros l n eq_Sk'_n lt_n_length_l. destruct l as [|l_O l'].
+      (* absurd *)
+      + contradiction (Nat.nle_succ_0 _ lt_n_length_l).
+      (* get (replace_nth n (l_O :: l') new) (S k') = new *)
+      + rewrite <- eq_Sk'_n in lt_n_length_l; simpl in lt_n_length_l.
+        pose proof (IHk l' k' eq_refl (le_S_n _ _ lt_n_length_l)) as proof.
+        rewrite <- eq_Sk'_n; simpl.
+        unfold get; unfold get in proof; simpl.
+        exact proof.
+  Qed.
+
   Lemma replace_nth_only_modifies_nth_component : forall (n: nat) (l: list nat) (new: nat) (k: nat),
     ~ k = n -> get (replace_nth n l new) k = get l k.
   Proof.
@@ -1202,30 +1225,369 @@ Section Array.
                    +++ simpl; simpl in proof. rewrite <- eq_O_add_tup_OO.
                        exact proof.
   Defined.
-  Next Obligation.
-                   
-                   rewrite <- map_nth.  simpl.
- Check map_nth. rewrite <- map_nth. simpl. Search (0 = S ?x).
-             simpl in ix_list_properties.
-pose proof (IHi_val dim' (tail_shape outer_shape)
-           pose (tail_ix ix) as tl_ix. proof Heqnth_tuple.
-        
-                exact H.
-                Search (S ?x + ?y = S (?x + ?y)).
-                Search (?x - ?m + ?m). Search (?x <= ?y -> ?x + ?z <= ?y + ?z).
-        unfold fst.
-        simpl.
-        pattern 0 at 2. rewrite H. simpl.
-      pose proof ((fun tx : nat * nat => fst tx + snd tx)fst (0, 0) + 0 = 0).
-      rewrite map_nth.
 
+  (* Definition 2, rho' *)
+  Definition rho' {dim} {outer_shape: Shape dim} (padded_array: PaddedArray E outer_shape)
+      : InnerShape outer_shape := snd padded_array.
+
+  (* By default, as stated in definition 2, we assume that each axis i of a shape without annotation in an array
+     implicitly carries an annotation b_i = 0 and e_i = s_i, where s_i is the coefficient of the shape at index i.
+     This gives rise to the following conversion functions from unannotated shapes to annotated shapes, and thus
+     from arrays to annotated arrays:
+  *)
+  Program Definition shape_to_inner_shape {dim} (shape: Shape dim): InnerShape shape :=
+     map (fun shape_component => (O, shape_component)) shape.
+  Next Obligation. split.
+    (* length (map (fun shape_component : nat => (0, shape_component)) (` shape)) = dim *)
+    * rewrite map_length.
+      destruct shape as [shape_list shape_list_has_length_dim].
+      exact shape_list_has_length_dim.
+    (*
+      forall i : Fin dim,
+      fst (nth (` i) (map (fun shape_component : nat => (0, shape_component)) (` shape)) (0, 0)) <=
+      snd (nth (` i) (map (fun shape_component : nat => (0, shape_component)) (` shape)) (0, 0)) <= 
+      get (` shape) (` i)
+    *)
+    * intro i.
+      destruct i as [i_val i_lt_dim]; simpl.
+      generalize dependent dim.
+      induction i_val as [|i_val' IHi_val].
+      (* i_val = O *)
+      + intros dim shape O_lt_dim.
+        destruct shape as [shape_list shape_list_has_length_dim].
+        destruct shape_list as [|shape_list_O shape_list']. unfold get; simpl.
+        (* shape_list = nil *)
+        - split. all:try apply le_refl.
+        (* shape_list = shape_list_O :: shape_list' *)
+        - unfold get; simpl. split.
+          ** apply Nat.le_0_l.
+          ** apply le_refl.
+      (* i_val = S i_val' *)
+      + intros dim shape Si_val'_lt_dim.
+        destruct dim as [|dim'].
+        (* absurd *)
+        - contradiction (Nat.nle_succ_0 _ Si_val'_lt_dim).
+        - pose (tail_shape shape) as tl_shape.
+          destruct shape as [shape_list shape_list_has_length_dim].
+          destruct shape_list as [|shape_list_O shape_list']. unfold get; simpl.
+          (* absurd *)
+          ** rewrite <- shape_list_has_length_dim in Si_val'_lt_dim; simpl in Si_val'_lt_dim.
+             contradiction (Nat.nle_succ_0 _ Si_val'_lt_dim).
+          (* shape_list = shape_list_O :: shape_list' *)
+          ** simpl.
+             pose proof (IHi_val dim' tl_shape (le_S_n _ _ Si_val'_lt_dim)) as proof.
+             unfold tail_shape in tl_shape; simpl in tl_shape.
+             simpl in proof. exact proof.
   Defined.
-  Definition PaddedShape {dim}
-  Definition PaddedArray {dim} E (padded_shape: PaddedShape (S dim)) 
+  Solve All Obligations.
 
-  Definition Shape dim := { s: list nat | length s = dim }.
-Definition Array {dim} E (shape : Shape dim) :=
-    Index shape -> E.
+  Definition array_to_padded_array {dim} {shape: Shape dim} (array: Array E shape): PaddedArray E shape :=
+    (array, shape_to_inner_shape shape).
+
+  (* Definition 3, cpadl and cpadr.
+     We define the circular left (respectively right) padding operation cpadl (respectively cpadr) as
+     special cases of the more generic padl (respectively padr) operation.
+     While general padding takes a row as an argument, circular padding, as defined in the paper,
+     requires that the inner_array contains elements, i.e. that the inner shape components are all
+     non-zero. *)
+  Program Definition shape_to_padded_shape {dim} (axis: Fin dim) (shape: Shape dim): Shape dim :=
+    replace_nth (` axis) (` shape) (S (get (` shape) (` axis))).
+  Next Obligation. (* length (replace_nth (` axis) (` shape) (S (get (` shape) (` axis)))) = dim *)
+    rewrite replace_nth_length_invariant.
+    destruct shape as [junk proof]. exact proof.
+  Defined.
+
+  Program Definition padding_shape {dim} (axis: Fin dim) (shape: Shape dim): Shape (dim - (` axis)) :=
+    exist _ (1 :: skipn (S (` axis)) (` shape)) _.
+  Next Obligation.
+    destruct shape as [shape_list shape_list_has_length_dim]. simpl.
+    destruct shape_list as [|shape_list_O shape_list'].
+    (* absurd *)
+    * destruct axis as [axis_val axis_lt_dim]; simpl.
+      rewrite <- shape_list_has_length_dim in axis_lt_dim.
+      contradiction (Nat.nle_succ_0 _ axis_lt_dim).
+    (* shape_list = shape_list_O :: shape_list' *)
+    * rewrite skipn_length.
+      destruct axis as [axis_val axis_lt_dim]; simpl.
+      simpl in shape_list_has_length_dim.
+      rewrite <- shape_list_has_length_dim.
+      rewrite <- shape_list_has_length_dim in axis_lt_dim.
+      rewrite (Nat.sub_succ_l _ _ (le_S_n _ _ axis_lt_dim)).
+      reflexivity.
+  Defined.
+
+  Obligation Tactic := idtac.
+  Program Definition padr {dim} {outer_shape: Shape (S dim)} (axis: Fin (S dim))
+        (pad_values: Array E (padding_shape axis outer_shape)) (padded_array: PaddedArray E outer_shape)
+      : PaddedArray E (shape_to_padded_shape axis outer_shape) :=
+    let (array, inner_shape) := padded_array in
+    let s_axis := get outer_shape axis in
+    let bounds := nth axis inner_shape (0, 0) in
+    let new_array := (fun ix =>
+          let axis_lt_upper_bound := (get (` ix) (` axis)) <? (snd bounds) in
+          (match axis_lt_upper_bound as v return axis_lt_upper_bound = v -> _ with
+            | false => fun eq_axis => pad_values (exist _ (O :: skipn (S (` axis)) (` ix)) _)
+            | true => fun eq_axis => array (exist _ (` ix) _) end) eq_refl) in
+    (new_array, exist _ inner_shape _).
+  Next Obligation. intros dim outer_shape axis pad_values padded_array array inner_shape s_axis bounds ix axis_lt_upper_bound wit_axis_lt_upper_bound.
+    simpl. split.
+    (* length (` ix) = S dim *)
+    * destruct ix as [ix_list ix_list_properties]; exact (proj1 ix_list_properties).
+    (* forall i : Fin (S dim), get (` ix) (` i) < get (` outer_shape) (` i) *)
+    * unfold shape_to_padded_shape in ix; simpl in ix.
+      intro i. pose proof (proj2 (proj2_sig ix) i) as proof.
+      pose proof (proj1 (Nat.ltb_lt _ _) wit_axis_lt_upper_bound) as proof_axis_lt_upper_bound.
+      clear wit_axis_lt_upper_bound.
+      case_eq ((` i) ?= (` axis)).
+      (* i = axis *)
+      - intro wit_eq; pose proof (Nat.compare_eq _ _ wit_eq) as proof_eq.
+        clear axis_lt_upper_bound wit_eq pad_values padded_array array s_axis.
+        rewrite proof_eq in proof.
+        destruct outer_shape as [outer_shape_list outer_shape_list_has_length_Sdim].
+        destruct axis as [axis_val axis_lt_Sdim]; simpl; simpl in proof.
+        generalize axis_lt_Sdim; intro free_proof_helper.
+        rewrite <- outer_shape_list_has_length_Sdim in free_proof_helper.
+        rewrite (replace_nth_modifies_nth_component _ _ _ _ eq_refl free_proof_helper) in proof.
+        clear free_proof_helper.
+        destruct inner_shape as [inner_shape_list inner_shape_list_properties]; simpl in ix; simpl in bounds.
+        pose proof (proj2 inner_shape_list_properties i) as proof_helper.
+        simpl in inner_shape_list_properties; simpl in proof_helper; simpl in proof_eq.
+        rewrite proof_eq in proof_helper; rewrite proof_eq.
+        simpl in proof_axis_lt_upper_bound.
+        exact (le_trans _ _ _ proof_axis_lt_upper_bound (proj2 proof_helper)).
+    (* i < axis *)
+    - intro wit_lt; pose proof (proj1 (Nat.compare_lt_iff _ _) wit_lt) as proof_lt.
+      pose proof (Nat.lt_neq _ _ proof_lt) as proof_neq.
+      rewrite (replace_nth_only_modifies_nth_component _ _ _ _ proof_neq) in proof.
+      exact proof.
+    (* i > axis *)
+    - intro wit_gt; pose proof (proj1 (Nat.compare_gt_iff _ _) wit_gt) as proof_gt.
+      pose proof (Nat.lt_neq _ _ proof_gt) as proof_neq.
+      apply not_eq_sym in proof_neq.
+      rewrite (replace_nth_only_modifies_nth_component _ _ _ _ proof_neq) in proof.
+      exact proof.
+  Defined.
+  Next Obligation. intros dim outer_shape axis pad_values padded_array array inner_shape s_axis bounds ix axis_lt_upper_bound axis_lt_upper_bound_val.
+    destruct ix as [ix_list ix_list_properties]; simpl.
+    destruct ix_list as [|ix_list_O ix_list']; simpl.
+    (* absurd *)
+    - contradiction (Nat.neq_0_succ _ (proj1 ix_list_properties)). - split.
+    (*
+      S (length (skipn (` axis) ix_list')) = match ` axis with
+                                             | 0 => S dim
+                                             | S l => dim - l
+                                             end
+    *)
+    * rewrite skipn_length. destruct axis as [axis_val axis_lt_Sdim]; simpl.
+      simpl in ix_list_properties.
+      rewrite (eq_add_S _ _ (proj1 ix_list_properties)).
+      destruct axis_val as [|axis_val'].
+      (* axis_val = O *)
+      + rewrite Nat.sub_0_r. reflexivity.
+      (* axis_val = S axis_val' *)
+      + rewrite <- (Nat.sub_succ_l _ _ (le_S_n _ _ axis_lt_Sdim)); simpl.
+        reflexivity.
+    (*
+      forall i : Fin match ` axis with
+                     | 0 => S dim
+                     | S l => dim - l
+                     end,
+      get (0 :: skipn (` axis) ix_list') (` i) <
+      get (1 :: match ` outer_shape with
+                | nil => nil
+                | _ :: l => skipn (` axis) l
+                end) (` i)
+    *)
+    * destruct outer_shape as [outer_shape_list outer_shape_list_has_length_Sdim]; simpl.
+      intro i.
+      destruct outer_shape_list as [|outer_shape_list_O outer_shape_list'].
+      (* absurd *)
+      + contradiction (Nat.neq_0_succ _ outer_shape_list_has_length_Sdim).
+      (* outer_shape_list = outer_shape_list_O :: outer_shape_list' *)
+      + simpl.
+        destruct i as [i_val i_lt_Sdim]; simpl.
+        destruct i_val as [|i_val'].
+        (* i_val = O *)
+        ** unfold get; simpl. apply Nat.lt_0_1.
+        (* i_val = S i_val' *)
+        ** unfold get; simpl.
+           destruct axis as [axis_val axis_lt_Sdim]. simpl.
+           destruct axis_val as [|axis_val'].
+           (* axis_val = O *)
+           ++ simpl in i_lt_Sdim.
+              unfold skipn; simpl.
+              exact (proj2 ix_list_properties (exist _ (S i_val') i_lt_Sdim)).
+           (* axis_val = S axis_val' *)
+           ++ simpl in i_lt_Sdim.
+              assert (forall (n m: nat) (li: list nat), get li (n + m) = get (skipn n li) m) as proof_helper.
+              -- clear. induction n as [|n' IHn].
+                 (* n = O *)
+                 --- intros m li; simpl. reflexivity.
+                 (* n = S n' *)
+                 --- intros m li. destruct li as [|li_O li'].
+                     *** unfold get; simpl. case_eq m. all:reflexivity.
+                     *** unfold get; unfold get in IHn; simpl. exact (IHn m li').
+              -- unfold get in proof_helper.
+                 rewrite <- proof_helper.
+                 rewrite <- proof_helper.
+                 clear proof_helper.
+                 assert (S (S axis_val' + i_val') < S dim) as composite_axis_bound_property.
+                 --- apply (plus_le_compat_r _ _ axis_val') in i_lt_Sdim.
+                     rewrite (Nat.sub_add _ _ (le_Sn_le _ _ (le_S_n _ _ axis_lt_Sdim))) in i_lt_Sdim.
+                     rewrite Nat.add_succ_comm in i_lt_Sdim.
+                     rewrite Nat.add_succ_l in i_lt_Sdim.
+                     rewrite Nat.add_comm in i_lt_Sdim.
+                     apply (le_n_S _ _ i_lt_Sdim).
+                 --- pose proof (proj2 ix_list_properties (exist _ (S (S axis_val' + i_val')) composite_axis_bound_property)) as proof.
+                     unfold get in proof; simpl in proof.
+                     case_eq (axis_val' ?= S (axis_val' + i_val')).
+                     (* absurd *)
+                     +++ intro wit_eq.
+                         pose proof (Nat.compare_eq _ _ wit_eq) as proof_eq.
+                         Search (?x = S ?x). Search (?x < S ?x).
+                         pose proof (Nat.lt_succ_diag_r axis_val') as contradiction_proof.
+                         apply (fun cp => le_trans _ _ _ cp (Nat.le_add_r _ i_val')) in contradiction_proof.
+                         rewrite Nat.add_succ_l in contradiction_proof.
+                         contradiction (Nat.lt_neq _ _ contradiction_proof proof_eq).
+                     (* axis_val' < S (axis_val' + i_val') *)
+                     +++ intro wit_lt.
+                         pose proof (nat_compare_Lt_lt _ _ wit_lt) as proof_lt.
+                         pose proof (Nat.lt_neq _ _ proof_lt) as proof_neq.
+                         fold (get (replace_nth axis_val' outer_shape_list' (S (get (outer_shape_list_O :: outer_shape_list') (S axis_val')))) (S (axis_val' + i_val'))) in proof.
+                         simpl in outer_shape_list_has_length_Sdim.
+                         pose proof (le_S_n _ _ axis_lt_Sdim) as rewrite_prerequisite.
+                         rewrite <- (eq_add_S _ _ outer_shape_list_has_length_Sdim) in rewrite_prerequisite.
+                         rewrite (replace_nth_only_modifies_nth_component _ _ _ _ (not_eq_sym proof_neq)) in proof.
+                         unfold get in proof; exact proof.
+                    (* absurd *)
+                    +++ intro wit_gt.
+                        pose proof (nat_compare_Gt_gt _ _ wit_gt) as contradiction_proof.
+                        apply le_Sn_le in contradiction_proof.
+                        rewrite <- Nat.add_succ_l in contradiction_proof.
+                        assert (forall (x y z: nat), x + y <= z -> x <= z) as contradiction_proof_helper.
+                        *** clear. intros x y z le_xy_z.
+                            Search (?x - ?y <= ?x).
+                            pose proof (Nat.le_sub_l z y) as helper.
+                            Search (?x <= ?z -> ?x - ?y <= ?z - ?y).
+                            apply (Nat.sub_le_mono_r _ _ y) in le_xy_z.
+                            rewrite Nat.add_sub in le_xy_z.
+                            exact (le_trans _ _ _ le_xy_z helper).
+                        *** apply contradiction_proof_helper in contradiction_proof.
+                            contradiction (Nat.nle_succ_diag_l _ contradiction_proof).
+  Defined.
+  Next Obligation. simpl. intros dim outer_shape axis pad_values padded_array array inner_shape.
+    split.
+    (* length (` inner_shape) = S dim *)
+    * apply (proj1 (proj2_sig inner_shape)).
+    (*
+      forall i : Fin (S dim),
+      fst (nth (` i) (` inner_shape) (0, 0)) <= snd (nth (` i) (` inner_shape) (0, 0)) <=
+      get (replace_nth (` axis) (` outer_shape) (S (get (` outer_shape) (` axis)))) (` i)
+    *)
+    * intro i. split.
+      (* fst (nth (` i) (` inner_shape) (0, 0)) <= snd (nth (` i) (` inner_shape) (0, 0)) *)
+      - apply (proj2 (proj2_sig inner_shape) i).
+      (*
+        snd (nth (` i) (` inner_shape) (0, 0)) <=
+        get (replace_nth (` axis) (` outer_shape) (S (get (` outer_shape) (` axis)))) (` i)
+      *)
+      - destruct inner_shape as [inner_shape_list inner_shape_list_properties]; simpl.
+        pose proof (proj2 (proj2 inner_shape_list_properties i)) as proof.
+        case_eq ((` i) ?= (` axis)).
+        (* i = axis *)
+        + intro wit_eq; pose proof (Nat.compare_eq _ _ wit_eq) as proof_eq.
+          generalize (proj2_sig axis); intro free_proof_helper.
+          rewrite <- (proj2_sig outer_shape) in free_proof_helper.
+          rewrite (replace_nth_modifies_nth_component _ _ _ _ proof_eq free_proof_helper).
+          rewrite <- proof_eq.
+          exact (le_trans _ _ _ proof (Nat.le_succ_diag_r _)).
+        (* i < axis *)
+        + intro wit_lt; pose proof (proj1 (Nat.compare_lt_iff _ _) wit_lt) as proof_lt.
+          pose proof (Nat.lt_neq _ _ proof_lt) as proof_neq.
+          rewrite (replace_nth_only_modifies_nth_component _ _ _ _ proof_neq).
+          exact proof.
+        (* i > axis *)
+        + intro wit_gt; pose proof (proj1 (Nat.compare_gt_iff _ _) wit_gt) as proof_gt.
+          pose proof (Nat.lt_neq _ _ proof_gt) as proof_neq.
+          apply not_eq_sym in proof_neq.
+          rewrite (replace_nth_only_modifies_nth_component _ _ _ _ proof_neq).
+          exact proof.
+  Defined.
+
+  Obligation Tactic := program_simpl.
+
+  Program Definition cpadr {dim} {outer_shape: Shape dim} (axis: Fin dim)
+      (padded_array: PaddedArray E outer_shape)
+      : PaddedArray E (shape_to_padded_shape axis outer_shape) :=
+    let (array, inner_shape) := padded_array in
+    let s_axis := get outer_shape axis in
+    let bounds := nth axis inner_shape (0, 0) in
+    let new_array := (fun ix =>
+          if beq_nat (get (` ix) (` axis)) (snd bounds)
+          then array (exist _ (replace_nth (` axis) (` ix) (fst bounds + s_axis - snd bounds)) _)
+          else array (exist _ (` ix) _)) in
+    (new_array, exist _ inner_shape _).
+  Next Obligation. split.
+    (* length (replace_nth (` axis) ix (b_axis + get (` outer_shape) (` axis) - e_axis)) = length ix *)
+    * apply replace_nth_length_invariant.
+    (*
+      forall i : Fin (length ix),
+      get (replace_nth (` axis) ix (b_axis + get (` outer_shape) (` axis) - e_axis)) (` i) < get (` outer_shape) (` i)
+    *)
+    * intro i. destruct inner_shape as [inner_shape inner_shape_properties].
+      simpl.
+      assert (forall (a b c: nat), a <= b -> b <= c -> a + c - b <= c) as general_proof.
+      + induction a as [|a' IHa].
+        (* a = O *)
+        - intros b c O_leq_b b_leq_c.
+          rewrite plus_O_n.
+          apply Nat.le_sub_l.
+        (* a = S a' *)
+        - intros b c Sa'_leq_b b_leq_c.
+          destruct b as [|b'].
+          (* absurd *)
+          ** contradiction (Nat.nle_succ_0 _ Sa'_leq_b).
+          (* b = S b' *)
+          ** rewrite Nat.add_succ_l.
+             rewrite Nat.sub_succ.
+             exact (IHa b' c (le_S_n _ _ Sa'_leq_b) (le_Sn_le _ _ b_leq_c)).
+      + destruct i as [i_val i_lt_length_ix].
+        pose proof (proj2 inner_shape_properties axis) as proof_prerequisites.
+        destruct axis as [axis_val axis_lt_length_ix]; simpl; simpl in proof_prerequisites.
+        case_eq (i_val ?= axis_val).
+        (* (i_val ?= axis_val) = Eq *)
+        ++ intro wit_eq_i_val_axis_val.
+           pose proof (Nat.compare_eq _ _ wit_eq_i_val_axis_val) as eq_i_val_axis_val.
+           rewrite eq_i_val_axis_val.
+           rewrite (replace_nth_modifies_nth_component _ _ _ _ eq_refl axis_lt_length_ix).
+           exact (general_proof _ _ _ (proj1 proof_prerequisites) (proj2 proof_prerequisites)).
+           unfold get; simpl. Search (S ?x + ?c). Search (S ?x - S ?y). Search (S ?x <= O). Search (?x - ?y <= ?x). Search (O + ?x). simpl.
+
+
+replace_nth_modifies_nth_component {A: Type} : forall (n: nat) (l: list nat) (new: nat) (k: nat),
+    k = n -> n < length l -> get (replace_nth n l new) k = new
+
+Program Definition rot_i_right {dim} {shape: Shape (S dim)} (axis: Fin (S dim))
+      (offset: Fin (S (get (` shape) (` axis)))) (array: Array E shape): Array E shape :=
+    let shape_axis := get (` shape) (` axis) in
+    fun ix => array (exist _ (replace_nth (` axis) (` ix)
+                                          ((get (` ix) (` axis) + shape_axis - offset) mod shape_axis)) _).
+(* Program Fixpoint cpadr {dim} {sas : sliceannshape (S dim)} (saa : sliceannarray sas) (axis : nat)
+  (axis_lt_sdim : axis < S dim) (pi_gt_O : 0 < pi (innershape sas)) {struct axis}
+    : sliceannarray (inc_sliceannshapedim sas axis axis_lt_sdim) :=
+  let result_shape := inc_sliceannshapedim sas axis axis_lt_sdim in
+  (match axis as maxis, sas as msas in sliceannshape sdim
+         return forall (ddim : sdim = S dim), axis = maxis -> sas = transport msas ddim -> sliceannarray result_shape with
+    | _, sasnil => fun _ _ _ => _ (* absurd case *)
+    | O, sascons _ _ => fun ddim daxis _ => cpadrO saa pi_gt_O
+    | S axis', sascons sd_O sas' => fun ddim daxis dsas =>
+        let subsliceannarrays := split_slices_saa saa in
+        let sigma_map_fn := sigma_map (n:=sliceanndimbound sd_O) (fun arr => cpadr (dim:=pred dim) (sas:=sas') arr axis' _ _) in
+        (fun map_fn subsliceannarrays =>
+          mksaarr result_shape _(*=hole*))
+          (* hole = elems (join_slices (mapvect (fun subarr => outerarray (cpadr subarr i' _ _)) subarrays)) *)
+          sigma_map_fn subsliceannarrays
+   end) eq_refl eq_refl eq_refl.*)
 (*
   Program Definition rot0_right {dim} {shape: Shape (S dim)} (offset: Fin (S (hd 0 (` shape))))
       (array: Array E shape): Array E shape :=
